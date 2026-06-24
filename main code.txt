@@ -1,0 +1,191 @@
+#define BLYNK_TEMPLATE_ID "TMPL6QSC8duZ3"
+#define BLYNK_TEMPLATE_NAME "Gas and Flame Detector"
+#define BLYNK_AUTH_TOKEN "fzmtOMqlrZIA2nlnwfzQ7fRYOaXIOWIz"
+
+#define BLYNK_PRINT Serial
+
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include <BlynkSimpleEsp32.h>
+#include <Wire.h>
+#include <LiquidCrystalPCF8574.h>
+
+// Your WiFi Credentials
+char auth[] = BLYNK_AUTH_TOKEN;
+char ssid[] = "YOUR_WIFI_SSID";     
+char pass[] = "YOUR_WIFI_PASSWORD"; 
+
+// LCD Setup
+LiquidCrystalPCF8574 lcd(0x27);
+
+// Sensor Pins
+const int gasSensorPin = 32;
+const int waterSensorPin = 34;
+const int flameSensorPin = 35; 
+
+// Output Pins
+const int buzzerPin = 25;
+const int fanPin = 27;
+const int pumpPin = 26;
+
+// Thresholds
+const int gasThreshold = 500;        
+const int criticalGasThreshold = 850; 
+const int waterThreshold = 500;      
+const int flameThreshold = 4000;      
+
+// Global Variables for Blynk tracking
+int gasLevel = 0;
+int waterLevel = 0;
+int flameLevel = 0;
+String systemStatusUpdate = "Normal";
+
+BlynkTimer timer;
+
+// Function to send data to Blynk App (runs every 1 second)
+void sendSensorData()
+{
+  Blynk.virtualWrite(V0, gasLevel);           // Gas Level on V0
+  Blynk.virtualWrite(V1, waterLevel);         // Water Level on V1
+  Blynk.virtualWrite(V2, flameLevel);         // Flame Level on V2
+  Blynk.virtualWrite(V3, systemStatusUpdate); // System Status on V3
+}
+
+void setup()
+{
+  Serial.begin(115200);
+
+  pinMode(gasSensorPin, INPUT);
+  pinMode(waterSensorPin, INPUT);
+  pinMode(flameSensorPin, INPUT); 
+  
+  pinMode(buzzerPin, OUTPUT);
+  pinMode(fanPin, OUTPUT);
+  pinMode(pumpPin, OUTPUT);
+
+  digitalWrite(buzzerPin, LOW);
+  digitalWrite(fanPin, LOW);
+  digitalWrite(pumpPin, LOW);
+
+  lcd.begin(16, 2); 
+  lcd.setBacklight(1); 
+
+  lcd.setCursor(0, 0);
+  lcd.print("Gas/Flame Sys  ");
+  lcd.setCursor(0, 1);
+  lcd.print("Initializing... ");
+
+  // Start Blynk
+  Blynk.begin(auth, ssid, pass);
+
+  // Setup a timer function to send data to Blynk every 1000ms (1 second)
+  timer.setInterval(1000L, sendSensorData);
+
+  delay(1000);
+  lcd.clear();
+}
+
+void loop()
+{
+  // Run Blynk processes
+  Blynk.run();
+  timer.run();
+
+  // Read Sensors
+  gasLevel = analogRead(gasSensorPin);
+  waterLevel = analogRead(waterSensorPin);
+  flameLevel = analogRead(flameSensorPin); 
+
+  Serial.print("Gas: ");
+  Serial.print(gasLevel);
+  Serial.print(" | Water: ");
+  Serial.print(waterLevel);
+  Serial.print(" | Flame: ");
+  Serial.println(flameLevel);
+
+  // Flags to keep track of statuses for the LCD and Blynk layouts
+  String flameStatus = "OK ";
+  String gasStatus   = "OK ";
+  String waterStatus = "LOW";
+
+  if (waterLevel > waterThreshold) {
+    waterStatus = "OK ";
+  }
+
+  // -----------------------------------------------------------------
+  // CONDITION 1: FLAME DETECTED (Highest Priority)
+  // -----------------------------------------------------------------
+  if (flameLevel <= flameThreshold)
+  {
+    flameStatus = "FR!"; 
+    systemStatusUpdate = "FIRE DETECTED!";
+    
+    digitalWrite(buzzerPin, HIGH);
+    digitalWrite(fanPin, HIGH);
+    digitalWrite(pumpPin, HIGH); 
+  }
+
+  // -----------------------------------------------------------------
+  // CONDITION 2: CRITICAL GAS LEVEL (No Flame)
+  // -----------------------------------------------------------------
+  else if (gasLevel >= criticalGasThreshold)
+  {
+    gasStatus = "CRT"; 
+    systemStatusUpdate = "CRITICAL GAS!";
+
+    digitalWrite(buzzerPin, HIGH);
+    digitalWrite(fanPin, HIGH);
+
+    if (waterLevel > waterThreshold) {
+      digitalWrite(pumpPin, HIGH);
+    } else {
+      digitalWrite(pumpPin, LOW); 
+    }
+  }
+
+  // -----------------------------------------------------------------
+  // CONDITION 3: GAS DETECTED (No Flame)
+  // -----------------------------------------------------------------
+  else if (gasLevel >= gasThreshold)
+  {
+    gasStatus = "DET"; 
+    systemStatusUpdate = "Gas Warning";
+
+    digitalWrite(buzzerPin, HIGH); 
+    digitalWrite(fanPin, HIGH);
+
+    if (waterLevel > waterThreshold) {
+      digitalWrite(pumpPin, HIGH);
+    } else {
+      digitalWrite(pumpPin, LOW); 
+    }
+  }
+
+  // -----------------------------------------------------------------
+  // CONDITION 4: SYSTEM NORMAL
+  // -----------------------------------------------------------------
+  else
+  {
+    systemStatusUpdate = "System Normal";
+    digitalWrite(buzzerPin, LOW);
+    digitalWrite(fanPin, LOW);
+    digitalWrite(pumpPin, LOW);
+  }
+
+  // -----------------------------------------------------------------
+  // DYNAMIC LCD UPDATE
+  // -----------------------------------------------------------------
+  lcd.setCursor(0, 0);
+  lcd.print("FLM:");
+  lcd.print(flameStatus);
+  lcd.print(" GAS:");
+  lcd.print(gasStatus);
+  lcd.print("  ");
+
+  lcd.setCursor(0, 1);
+  lcd.print("WTR:");
+  lcd.print(waterStatus);
+  lcd.print("             "); 
+
+  delay(500); 
+}
